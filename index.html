@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f8f4ee">
+<title>VoKal — 嗓音分析</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink:     #1a1412;
+  --paper:   #f8f4ee;
+  --cream:   #ede8de;
+  --gold:    #c9973a;
+  --gold-lt: #e8c97a;
+  --crimson: #8b1a1a;
+  --teal:    #1a6b6e;
+  --teal-lt: #2a9da2;
+  --muted:   #7a7268;
+  --green:   #2d7a3a;
+  --line:    rgba(26,20,18,0.12);
+  --safe-b:  env(safe-area-inset-bottom, 0px);
+  --safe-t:  env(safe-area-inset-top, 0px);
+  --bar-h:   58px;
+  --hdr-h:   52px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font-family:'Noto Sans TC',sans-serif;font-weight:300;-webkit-font-smoothing:antialiased;}
+button{font-family:inherit;cursor:pointer;border:none;background:none;}
+
+/* Overlay */
+.overlay{position:fixed;inset:0;z-index:300;background:var(--paper);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem;padding:2rem;text-align:center;}
+.overlay-icon{font-size:4rem;line-height:1;margin-bottom:.5rem;}
+.overlay h2{font-family:'Playfair Display',serif;font-size:2rem;}
+.overlay p{font-size:.88rem;color:var(--muted);line-height:1.7;max-width:300px;}
+.overlay-btns{display:flex;flex-direction:column;gap:.6rem;width:100%;max-width:280px;margin-top:.5rem;}
+.obtn{padding:.85rem 1rem;border-radius:10px;font-size:1rem;font-weight:500;border:1.5px solid var(--ink);color:var(--ink);}
+.obtn.primary{background:var(--crimson);border-color:var(--crimson);color:#fff;}
+
+/* Header */
+.hdr{position:fixed;top:0;left:0;right:0;z-index:100;height:var(--hdr-h);padding-top:var(--safe-t);display:flex;align-items:center;justify-content:space-between;padding-left:1.1rem;padding-right:1.1rem;background:var(--paper);border-bottom:1px solid var(--line);}
+.logo{font-family:'Playfair Display',serif;font-size:1.6rem;letter-spacing:-.02em;line-height:1;}
+.logo em{color:var(--crimson);font-style:italic;}
+.hdr-right{display:flex;align-items:center;gap:.5rem;}
+.dot{width:8px;height:8px;border-radius:50%;background:#ccc;flex-shrink:0;transition:background .3s;}
+.dot.active{background:#4caf50;box-shadow:0 0 7px #4caf5088;}
+.dot.rec{background:var(--crimson);animation:blink 1s infinite;}
+.hdr-lbl{font-family:'JetBrains Mono',monospace;font-size:.58rem;color:var(--muted);}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* Scroll */
+.scroll-area{position:fixed;top:var(--hdr-h);bottom:calc(var(--bar-h) + var(--safe-b));left:0;right:0;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.scroll-area::-webkit-scrollbar{display:none;}
+
+/* Pages */
+.page{display:none;padding:.85rem 1rem 2rem;}
+.page.active{display:block;}
+
+/* Section label */
+.slabel{font-family:'JetBrains Mono',monospace;font-size:.56rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;}
+.slabel::after{content:'';flex:1;height:1px;background:var(--line);}
+
+/* Canvases */
+#waveCanvas{width:100%;height:68px;background:var(--cream);border-radius:8px;display:block;margin-bottom:.7rem;}
+#specCanvas{width:100%;height:105px;background:#1a1412;border-radius:8px;display:block;margin-bottom:.7rem;}
+#tunerCanvas{width:100%;height:78px;display:block;}
+#exTunerCanvas{width:100%;height:95px;display:block;border-radius:8px;background:var(--cream);}
+
+/* Metrics */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:.7rem;}
+.metric{background:var(--cream);border:1px solid var(--line);border-radius:8px;padding:.5rem .3rem;text-align:center;}
+.metric-val{font-family:'JetBrains Mono',monospace;font-size:1.05rem;font-weight:600;color:var(--teal);line-height:1;}
+.metric-lbl{font-size:.56rem;color:var(--muted);margin-top:3px;}
+
+/* Pitch badge */
+.pitch-badge{background:var(--cream);border:1px solid var(--line);border-radius:8px;padding:.55rem 1rem;display:flex;align-items:center;justify-content:space-between;margin-bottom:.7rem;}
+.pitch-badge-val{font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:600;color:var(--crimson);}
+.pitch-badge-lbl{font-size:.68rem;color:var(--muted);}
+
+/* Record button */
+.rec-wrap{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:1rem 0;}
+.rec-btn{width:88px;height:88px;border-radius:50%;background:var(--crimson);color:white;font-size:.82rem;font-weight:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;box-shadow:0 4px 20px rgba(139,26,26,.35);transition:transform .1s,box-shadow .1s;}
+.rec-btn:active{transform:scale(.94);}
+.rec-btn.recording{background:var(--ink);box-shadow:0 4px 20px rgba(26,20,18,.3);animation:blink 1.2s infinite;}
+.rec-icon{font-size:1.5rem;line-height:1;}
+.rec-lbl{font-size:.68rem;letter-spacing:.05em;}
+.analyze-btn{padding:.65rem 2rem;border-radius:24px;background:var(--teal);color:white;font-size:.9rem;font-weight:500;transition:opacity .15s;}
+.analyze-btn:disabled{opacity:.35;}
+.analyze-btn:not(:disabled):active{opacity:.75;}
+
+/* Score */
+.score-hero{display:flex;align-items:center;gap:1rem;margin-bottom:1rem;background:var(--cream);border:1px solid var(--line);border-radius:12px;padding:1rem 1.2rem;}
+.score-ring svg{width:80px;height:80px;display:block;}
+.score-num{font-family:'Playfair Display',serif;font-size:2.6rem;font-weight:700;line-height:1;color:var(--ink);}
+.score-grade{font-family:'JetBrains Mono',monospace;font-size:.63rem;letter-spacing:.15em;color:var(--gold);text-transform:uppercase;margin-top:2px;}
+.score-sub{font-size:.72rem;color:var(--muted);margin-top:6px;line-height:1.5;}
+#radarCanvas{width:100%;height:210px;}
+.target-card{background:var(--cream);border:1px solid var(--line);border-radius:12px;padding:.85rem 1rem;margin-top:.75rem;}
+.target-note-big{font-family:'Playfair Display',serif;font-size:3rem;text-align:center;color:var(--crimson);line-height:1;margin:.2rem 0;}
+.note-nav{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-top:.4rem;}
+.note-nav-btn{width:44px;height:44px;border-radius:50%;border:1.5px solid var(--line);background:var(--paper);font-size:1.1rem;display:flex;align-items:center;justify-content:center;}
+.note-nav-btn:active{background:var(--cream);}
+.note-hz{font-family:'JetBrains Mono',monospace;font-size:.75rem;color:var(--muted);text-align:center;flex:1;}
+.pitch-bar-wrap{width:100%;height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:.6rem;}
+.pitch-bar{height:100%;background:linear-gradient(90deg,var(--teal),var(--gold));border-radius:3px;transition:width .08s;width:0%;}
+.tip-box{background:#fff8f0;border:1px solid var(--gold-lt);border-left:3px solid var(--gold);border-radius:8px;padding:.7rem .9rem;font-size:.74rem;color:var(--ink);line-height:1.6;margin-top:.75rem;}
+.tip-box strong{color:var(--gold);font-weight:500;}
+
+/* ── Exercise Page ── */
+.ex-runner{background:var(--cream);border:1px solid var(--line);border-radius:14px;padding:1.1rem 1rem 1rem;margin-bottom:.75rem;}
+.ex-runner-title{font-size:1rem;font-weight:500;margin-bottom:.2rem;}
+.ex-runner-desc{font-size:.74rem;color:var(--muted);line-height:1.6;margin-bottom:.9rem;}
+.ex-steps{display:flex;flex-direction:column;gap:.3rem;margin-bottom:.85rem;}
+.ex-step{display:flex;align-items:flex-start;gap:.6rem;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:.5rem .7rem;font-size:.76rem;line-height:1.45;color:var(--muted);transition:all .2s;}
+.ex-step.current{background:#e8f5e9;border-color:#81c784;color:var(--ink);}
+.ex-step.done{opacity:.4;text-decoration:line-through;}
+.step-num{flex-shrink:0;width:20px;height:20px;border-radius:50%;background:var(--line);font-size:.62rem;font-weight:600;display:flex;align-items:center;justify-content:center;color:var(--muted);transition:all .2s;}
+.ex-step.current .step-num{background:var(--green);color:white;}
+.ex-step.done .step-num{background:#bbb;color:white;}
+
+/* Countdown */
+.countdown-wrap{display:flex;flex-direction:column;align-items:center;gap:.35rem;margin:.4rem 0 .7rem;}
+.countdown-svg{width:100px;height:100px;}
+.countdown-num{font-family:'JetBrains Mono',monospace;font-size:2rem;font-weight:600;color:var(--ink);line-height:1;}
+.countdown-lbl{font-size:.68rem;color:var(--muted);}
+
+/* Live pitch in exercise */
+.ex-pitch-row{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin:.5rem 0 .4rem;}
+.ex-pitch-val{font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:600;color:var(--crimson);}
+.ex-target-val{font-family:'JetBrains Mono',monospace;font-size:.73rem;color:var(--teal);text-align:right;}
+.cents-bar-wrap{width:100%;height:8px;background:var(--line);border-radius:4px;overflow:hidden;position:relative;margin-bottom:.2rem;}
+.cents-marker{position:absolute;top:0;bottom:0;left:50%;width:2px;background:var(--teal);transform:translateX(-50%);}
+.cents-needle{position:absolute;top:0;bottom:0;width:4px;background:var(--crimson);border-radius:2px;left:50%;transform:translateX(-50%);transition:left .08s,background .15s;}
+.cents-label{font-family:'JetBrains Mono',monospace;font-size:.6rem;color:var(--muted);text-align:center;}
+
+/* Exercise controls */
+.ex-controls{display:flex;gap:.6rem;margin-top:.7rem;}
+.ex-start-btn{flex:1;padding:.75rem;border-radius:10px;background:var(--crimson);color:white;font-size:.95rem;font-weight:500;transition:opacity .15s;}
+.ex-start-btn:active{opacity:.8;}
+.ex-start-btn.running{background:var(--ink);}
+.ex-skip-btn{padding:.75rem 1rem;border-radius:10px;border:1.5px solid var(--line);background:var(--paper);font-size:.85rem;color:var(--muted);}
+.ex-skip-btn:active{background:var(--cream);}
+
+/* Result */
+.ex-result{display:none;background:#e8f5e9;border:1px solid #81c784;border-radius:10px;padding:.9rem 1rem;text-align:center;margin-top:.75rem;}
+.ex-result.show{display:block;}
+.ex-result-score{font-family:'Playfair Display',serif;font-size:2.2rem;font-weight:700;color:var(--green);}
+.ex-result-lbl{font-size:.8rem;color:var(--muted);margin-top:3px;}
+.ex-result-tip{font-size:.74rem;color:var(--ink);margin-top:.6rem;line-height:1.55;}
+
+/* Exercise list */
+.ex-list{display:flex;flex-direction:column;gap:.4rem;}
+.ex-card{border:1px solid var(--line);border-radius:10px;padding:.78rem 1rem;position:relative;overflow:hidden;transition:background .15s,border-color .15s;}
+.ex-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--teal-lt);transform:scaleY(0);transform-origin:bottom;transition:transform .2s;}
+.ex-card.sel::before{transform:scaleY(1);}
+.ex-card.sel{background:var(--cream);border-color:var(--teal-lt);}
+.ex-card:active{background:var(--cream);}
+.ex-head{display:flex;align-items:center;gap:.5rem;}
+.ex-title-txt{font-size:.88rem;font-weight:500;flex:1;}
+.ex-badge{font-family:'JetBrains Mono',monospace;font-size:.54rem;padding:2px 6px;border-radius:4px;background:var(--teal);color:white;flex-shrink:0;}
+.ex-badge.med{background:var(--gold);color:var(--ink);}
+.ex-badge.adv{background:var(--crimson);}
+.ex-short-desc{font-size:.72rem;color:var(--muted);margin-top:3px;line-height:1.45;}
+
+/* History */
+.h-item{display:flex;align-items:center;gap:.55rem;padding:.65rem .4rem;border-bottom:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:.7rem;}
+.h-idx{color:var(--muted);min-width:22px;}
+.h-time{color:var(--muted);flex:1;}
+.h-note{color:var(--teal);min-width:38px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.h-grade{color:var(--muted);min-width:40px;}
+.h-score{font-weight:600;color:var(--teal);min-width:26px;text-align:right;}
+.history-empty{text-align:center;padding:3rem 1rem;font-size:.82rem;color:var(--muted);line-height:1.7;}
+.clear-btn{display:block;width:100%;margin-top:1rem;padding:.7rem;border-radius:8px;border:1.5px solid var(--line);background:transparent;font-size:.85rem;color:var(--muted);}
+.clear-btn:active{background:var(--cream);}
+
+/* Bottom Nav */
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:100;height:calc(var(--bar-h) + var(--safe-b));padding-bottom:var(--safe-b);background:var(--paper);border-top:1px solid var(--line);display:flex;}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:.35rem 0;color:var(--muted);transition:color .15s;}
+.nav-item.active{color:var(--crimson);}
+.nav-icon{font-size:1.3rem;line-height:1;}
+.nav-lbl{font-family:'JetBrains Mono',monospace;font-size:.54rem;letter-spacing:.08em;text-transform:uppercase;display:block;}
+.nav-item.active .nav-lbl{color:var(--crimson);}
+</style>
+</head>
+<body>
+
+<!-- Overlay -->
+<div class="overlay" id="overlay">
+  <div class="overlay-icon">🎙</div>
+  <h2>Vo<em style="color:var(--crimson);font-style:italic">Kal</em></h2>
+  <p>需要麥克風權限進行即時嗓音分析。<br>請允許瀏覽器存取您的麥克風。</p>
+  <div class="overlay-btns">
+    <button class="obtn primary" onclick="requestMic()">允許麥克風存取</button>
+    <button class="obtn" onclick="demoMode()">展示模式（無需麥克風）</button>
+  </div>
+</div>
+
+<!-- Header -->
+<header class="hdr">
+  <div class="logo">Vo<em>Kal</em></div>
+  <div class="hdr-right">
+    <div class="dot" id="micDot"></div>
+    <span class="hdr-lbl" id="statusTxt">待機中</span>
+  </div>
+</header>
+
+<!-- Scroll area -->
+<div class="scroll-area" id="scrollArea">
+
+  <!-- PAGE: 聲波 -->
+  <div class="page active" id="page-viz">
+    <div class="slabel">即時聲波形</div>
+    <canvas id="waveCanvas"></canvas>
+    <div class="slabel">頻譜聲紋</div>
+    <canvas id="specCanvas"></canvas>
+    <div class="metrics">
+      <div class="metric"><div class="metric-val" id="mHz">—</div><div class="metric-lbl">基頻 Hz</div></div>
+      <div class="metric"><div class="metric-val" id="mDB">—</div><div class="metric-lbl">音量 dB</div></div>
+      <div class="metric"><div class="metric-val" id="mJit">—</div><div class="metric-lbl">抖動 %</div></div>
+      <div class="metric"><div class="metric-val" id="mShim">—</div><div class="metric-lbl">閃爍 %</div></div>
+    </div>
+    <div class="slabel">音準調音器</div>
+    <canvas id="tunerCanvas"></canvas>
+    <div class="pitch-badge" style="margin-top:.7rem">
+      <div>
+        <div class="pitch-badge-lbl">即時音高</div>
+        <div class="pitch-badge-val" id="pitchDisplay">— Hz</div>
+      </div>
+      <div style="text-align:right">
+        <div class="pitch-badge-lbl">取樣率</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.78rem;color:var(--muted)" id="sampleRate">—</div>
+      </div>
+    </div>
+    <div class="rec-wrap">
+      <button class="rec-btn" id="recBtn" onclick="toggleRecord()">
+        <span class="rec-icon" id="recIcon">⏺</span>
+        <span class="rec-lbl"  id="recLbl">錄音</span>
+      </button>
+      <button class="analyze-btn" id="analyzeBtn" onclick="runAnalysis()" disabled>分析嗓音</button>
+    </div>
+  </div>
+
+  <!-- PAGE: 評分 -->
+  <div class="page" id="page-score">
+    <div class="score-hero">
+      <div class="score-ring">
+        <svg viewBox="0 0 80 80">
+          <circle cx="40" cy="40" r="34" fill="none" stroke="#ede8de" stroke-width="7"/>
+          <circle id="scoreArc" cx="40" cy="40" r="34" fill="none" stroke="#c9973a"
+            stroke-width="7" stroke-linecap="round"
+            stroke-dasharray="213.6" stroke-dashoffset="213.6"
+            transform="rotate(-90 40 40)"
+            style="transition:stroke-dashoffset .9s ease,stroke .4s"/>
+        </svg>
+      </div>
+      <div>
+        <div class="score-num"   id="scoreNum">—</div>
+        <div class="score-grade" id="scoreGrade">尚未測量</div>
+        <div class="score-sub"   id="scoreSub">錄音後點擊「分析嗓音」</div>
+      </div>
+    </div>
+    <div class="slabel">聲音雷達圖</div>
+    <canvas id="radarCanvas"></canvas>
+    <div class="target-card">
+      <div class="slabel" style="margin-bottom:.3rem">目標音高</div>
+      <div class="target-note-big" id="targetNote">A4</div>
+      <div class="note-nav">
+        <button class="note-nav-btn" onclick="prevNote()">&#9664;</button>
+        <div class="note-hz" id="targetHz">440 Hz</div>
+        <button class="note-nav-btn" onclick="nextNote()">&#9654;</button>
+      </div>
+      <div class="pitch-bar-wrap"><div class="pitch-bar" id="pitchBar"></div></div>
+    </div>
+    <div class="tip-box" id="tipBox">
+      <strong>提示：</strong>發出持續的母音「啊—」維持 3–5 秒，可獲得最佳分析結果。
+    </div>
+  </div>
+
+  <!-- PAGE: 練習 -->
+  <div class="page" id="page-exercises">
+
+    <!-- Runner panel -->
+    <div class="ex-runner" id="exRunner">
+      <div class="ex-runner-title" id="exRunnerTitle">—</div>
+      <div class="ex-runner-desc"  id="exRunnerDesc">—</div>
+      <div class="ex-steps" id="exStepList"></div>
+
+      <div class="countdown-wrap" id="countdownWrap" style="display:none">
+        <svg class="countdown-svg" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="44" fill="none" stroke="#ede8de" stroke-width="6"/>
+          <circle id="cdArc" cx="50" cy="50" r="44" fill="none" stroke="#1a6b6e"
+            stroke-width="6" stroke-linecap="round"
+            stroke-dasharray="276.5" stroke-dashoffset="0"
+            transform="rotate(-90 50 50)"
+            style="transition:stroke-dashoffset .25s linear,stroke .2s"/>
+        </svg>
+        <div class="countdown-num" id="cdNum">—</div>
+        <div class="countdown-lbl" id="cdLbl">準備</div>
+      </div>
+
+      <div id="exPitchPanel" style="display:none">
+        <div class="slabel" style="margin-bottom:.4rem">即時音準</div>
+        <canvas id="exTunerCanvas"></canvas>
+        <div class="ex-pitch-row">
+          <div>
+            <div style="font-size:.6rem;color:var(--muted)">你的音高</div>
+            <div class="ex-pitch-val" id="exPitchVal">— Hz</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:.6rem;color:var(--muted)">目標</div>
+            <div class="ex-target-val" id="exTargetVal">—</div>
+          </div>
+        </div>
+        <div class="cents-bar-wrap">
+          <div class="cents-marker"></div>
+          <div class="cents-needle" id="centsNeedle"></div>
+        </div>
+        <div class="cents-label" id="centsLabel">— ¢</div>
+      </div>
+
+      <div class="ex-controls">
+        <button class="ex-start-btn" id="exStartBtn" onclick="toggleExercise()">▶ 開始練習</button>
+        <button class="ex-skip-btn"  id="exSkipBtn"  onclick="skipStep()" style="display:none">跳過</button>
+      </div>
+
+      <div class="ex-result" id="exResult">
+        <div class="ex-result-score" id="exResultScore">—</div>
+        <div class="ex-result-lbl">練習完成！音準準確度</div>
+        <div class="ex-result-tip" id="exResultTip"></div>
+      </div>
+    </div>
+
+    <div class="slabel">選擇練習</div>
+    <div class="ex-list" id="exList"></div>
+  </div>
+
+  <!-- PAGE: 記錄 -->
+  <div class="page" id="page-history">
+    <div class="slabel">測量記錄</div>
+    <div id="historyList"><div class="history-empty">尚無記錄。<br>錄音並分析後將自動儲存於此。</div></div>
+    <button class="clear-btn" onclick="clearData()">清除所有記錄</button>
+  </div>
+
+</div><!-- /scroll-area -->
+
+<!-- Bottom Nav -->
+<nav class="bottom-nav">
+  <button class="nav-item active" id="nav-viz"       onclick="switchPage('viz',this)"><span class="nav-icon">🌊</span><span class="nav-lbl">聲波</span></button>
+  <button class="nav-item"        id="nav-score"     onclick="switchPage('score',this)"><span class="nav-icon">🎯</span><span class="nav-lbl">評分</span></button>
+  <button class="nav-item"        id="nav-exercises" onclick="switchPage('exercises',this)"><span class="nav-icon">🎵</span><span class="nav-lbl">練習</span></button>
+  <button class="nav-item"        id="nav-history"   onclick="switchPage('history',this)"><span class="nav-icon">📋</span><span class="nav-lbl">記錄</span></button>
+</nav>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ──────────────────────────────────────────────
+// EXERCISE DEFINITIONS
+// ──────────────────────────────────────────────
+const EXERCISES = [
+  { id:'scale', title:'音階爬升', badge:'初級', badgeClass:'', shortDesc:'從 C4 開始，依音階向上發音，每個音維持 2 秒',
+    desc:'從 C4 開始依音階向上，每個音維持 2 秒。保持氣息穩定，不讓音準因音高上升而飄移。',
+    steps:[
+      {label:'準備：深呼吸，放鬆喉嚨',type:'rest',duration:4},
+      {label:'C4 — 發「啊」音',type:'hold',duration:2,note:'C4'},
+      {label:'D4 — 發「啊」音',type:'hold',duration:2,note:'D4'},
+      {label:'E4 — 發「啊」音',type:'hold',duration:2,note:'E4'},
+      {label:'F4 — 發「啊」音',type:'hold',duration:2,note:'F4'},
+      {label:'G4 — 發「啊」音',type:'hold',duration:2,note:'G4'},
+      {label:'A4 — 發「啊」音',type:'hold',duration:2,note:'A4'},
+      {label:'B4 — 發「啊」音',type:'hold',duration:2,note:'B4'},
+      {label:'C5 — 發「啊」音',type:'hold',duration:2,note:'C5'},
+    ]
+  },
+  { id:'sustain', title:'持續音高穩定度', badge:'中級', badgeClass:'med', shortDesc:'選定音高，持續發音 10 秒，測試穩定度',
+    desc:'在 A4（440 Hz）持續發音 10 秒。目標是音準偏差在 ±10 音分以內，觀察調音器指針是否穩定。',
+    steps:[
+      {label:'準備：做 3 次深腹式呼吸',type:'rest',duration:6},
+      {label:'A4 — 持續發音 10 秒',type:'hold',duration:10,note:'A4'},
+      {label:'短暫休息換氣',type:'rest',duration:4},
+      {label:'A4 — 再持續發音 10 秒',type:'hold',duration:10,note:'A4'},
+    ]
+  },
+  { id:'passaggio', title:'聲區轉換練習', badge:'中級', badgeClass:'med', shortDesc:'在胸聲與頭聲之間自然過渡，練習換聲點',
+    desc:'從 E4 慢慢上行到 E5，在換聲點（約 F4–G4）自然過渡，不要用力擠壓或突然破音。',
+    steps:[
+      {label:'準備：哼鳴「嗯」暖聲 5 秒',type:'rest',duration:5},
+      {label:'E4 — 胸聲發「啊」',type:'hold',duration:3,note:'E4'},
+      {label:'F4 — 開始過渡',type:'hold',duration:3,note:'F4'},
+      {label:'G4 — 換聲點，保持放鬆',type:'hold',duration:3,note:'G4'},
+      {label:'A4 — 頭聲繼續',type:'hold',duration:3,note:'A4'},
+      {label:'C5 — 頭聲',type:'hold',duration:3,note:'C5'},
+      {label:'E5 — 頭聲輕聲',type:'hold',duration:3,note:'E5'},
+    ]
+  },
+  { id:'resonance', title:'共鳴腔訓練', badge:'高級', badgeClass:'adv', shortDesc:'閉口哼鳴「嗯—」感受鼻腔與胸腔的共鳴',
+    desc:'閉口哼鳴「嗯—」，用手輕觸鼻尖感受振動。共鳴良好時聲音應感覺向前、向上集中。',
+    steps:[
+      {label:'準備：放鬆臉部肌肉',type:'rest',duration:4},
+      {label:'A3 — 哼鳴「嗯」感受胸腔振動',type:'hold',duration:5,note:'A3'},
+      {label:'D4 — 哼鳴「嗯」感受鼻腔振動',type:'hold',duration:5,note:'D4'},
+      {label:'A4 — 哼鳴「嗯」感受額頭振動',type:'hold',duration:5,note:'A4'},
+      {label:'休息',type:'rest',duration:3},
+      {label:'A4 — 哼鳴轉「啊」，保持共鳴',type:'hold',duration:5,note:'A4'},
+    ]
+  },
+  { id:'vibrato', title:'顫音控制', badge:'高級', badgeClass:'adv', shortDesc:'在穩定音高上加入輕微顫音，頻率約 5–7 Hz',
+    desc:'先穩定發音 3 秒，再自然加入顫音（不要搖下巴）。顫音應由橫膈膜自然產生。',
+    steps:[
+      {label:'準備：完整氣息支撐練習',type:'rest',duration:4},
+      {label:'A4 — 先穩定發音 3 秒',type:'hold',duration:3,note:'A4'},
+      {label:'A4 — 加入顫音，持續 6 秒',type:'hold',duration:6,note:'A4'},
+      {label:'休息換氣',type:'rest',duration:4},
+      {label:'E4 — 穩定後加顫音，共 8 秒',type:'hold',duration:8,note:'E4'},
+    ]
+  },
+  { id:'dynamics', title:'動態範圍擴展', badge:'高級', badgeClass:'adv', shortDesc:'同一音高從極弱（pp）漸強至極強（ff）',
+    desc:'在 A4 上，從幾乎無聲（pp）用 5 秒漸強到最強（ff），再用 5 秒漸弱回來。音準應全程穩定。',
+    steps:[
+      {label:'準備：想像聲音從遠處傳來',type:'rest',duration:4},
+      {label:'A4 — 極弱（pp）開始',type:'hold',duration:2,note:'A4'},
+      {label:'A4 — 漸強，pp → ff（5 秒）',type:'hold',duration:5,note:'A4'},
+      {label:'A4 — 極強（ff）頂點',type:'hold',duration:2,note:'A4'},
+      {label:'A4 — 漸弱，ff → pp（5 秒）',type:'hold',duration:5,note:'A4'},
+      {label:'完成，休息換氣',type:'rest',duration:3},
+    ]
+  },
+];
+
+// ──────────────────────────────────────────────
+// NOTE TABLE
+// ──────────────────────────────────────────────
+const NOTENAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const NOTE_FREQS=[];
+for(let o=2;o<=7;o++) for(let n=0;n<12;n++) NOTE_FREQS.push({name:NOTENAMES[n]+o,freq:261.63*Math.pow(2,(n+(o-4)*12)/12)});
+let noteIdx=33; // A4
+function noteFreq(name){const n=NOTE_FREQS.find(x=>x.name===name);return n?n.freq:440;}
+function nearestNote(f){let b=NOTE_FREQS[0],bd=Infinity;NOTE_FREQS.forEach(n=>{const d=Math.abs(f-n.freq);if(d<bd){bd=d;b=n;}});return b;}
+
+// ──────────────────────────────────────────────
+// AUDIO STATE
+// ──────────────────────────────────────────────
+let audioCtx,analyser,source,micStream;
+let isRecording=false,isDemo=false,animFrame=null;
+let currentPitch=0,currentDB=-60,demoPhase=0;
+let radarChart=null,history=[];
+
+// ──────────────────────────────────────────────
+// EXERCISE STATE
+// ──────────────────────────────────────────────
+let selExIdx=0,exRunning=false,exStepIdx=0;
+let exTimer=null,exSecsLeft=0,exTotalSecs=0;
+let exScores=[],exTunerRAF=null;
+
+// ──────────────────────────────────────────────
+// CANVAS
+// ──────────────────────────────────────────────
+const waveC=document.getElementById('waveCanvas');
+const specC=document.getElementById('specCanvas');
+const tunerC=document.getElementById('tunerCanvas');
+const exTC=document.getElementById('exTunerCanvas');
+const wCtx=waveC.getContext('2d'),sCtx=specC.getContext('2d');
+const tCtx=tunerC.getContext('2d'),etCtx=exTC.getContext('2d');
+
+function resizeC(c){const dpr=window.devicePixelRatio||1,r=c.getBoundingClientRect();if(!r.width)return;c.width=Math.round(r.width*dpr);c.height=Math.round(r.height*dpr);c.getContext('2d').scale(dpr,dpr);}
+function resizeAll(){[waveC,specC,tunerC,exTC].forEach(resizeC);}
+window.addEventListener('resize',()=>setTimeout(resizeAll,80));
+setTimeout(resizeAll,300);
+
+// ──────────────────────────────────────────────
+// RADAR
+// ──────────────────────────────────────────────
+function initRadar(){
+  const el=document.getElementById('radarCanvas');
+  if(!el||radarChart)return;
+  radarChart=new Chart(el.getContext('2d'),{type:'radar',data:{labels:['音準','穩定度','共鳴','動態','音色','氣息'],datasets:[{data:[0,0,0,0,0,0],backgroundColor:'rgba(26,107,110,0.13)',borderColor:'#1a6b6e',pointBackgroundColor:'#1a6b6e',borderWidth:1.5,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{r:{min:0,max:100,ticks:{display:false},grid:{color:'rgba(26,20,18,0.08)'},pointLabels:{font:{size:12,family:'Noto Sans TC'},color:'#7a7268'},angleLines:{color:'rgba(26,20,18,0.07)'}}}}});
+}
+setTimeout(initRadar,400);
+
+// ──────────────────────────────────────────────
+// MIC / DEMO
+// ──────────────────────────────────────────────
+async function requestMic(){
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    analyser=audioCtx.createAnalyser();analyser.fftSize=4096;analyser.smoothingTimeConstant=0.78;
+    source=audioCtx.createMediaStreamSource(micStream);source.connect(analyser);
+    document.getElementById('overlay').style.display='none';
+    document.getElementById('micDot').className='dot active';
+    document.getElementById('statusTxt').textContent='已連線';
+    document.getElementById('sampleRate').textContent=(audioCtx.sampleRate/1000).toFixed(1)+' kHz';
+    startVisualization();
+  }catch(e){alert('無法存取麥克風：'+e.message+'\n\n請改用「展示模式」。');}
+}
+function demoMode(){
+  isDemo=true;
+  document.getElementById('overlay').style.display='none';
+  document.getElementById('micDot').className='dot active';
+  document.getElementById('statusTxt').textContent='展示模式';
+  document.getElementById('sampleRate').textContent='44.1 kHz';
+  startVisualization();
+}
+
+// ──────────────────────────────────────────────
+// VIZ LOOP
+// ──────────────────────────────────────────────
+function startVisualization(){
+  const bufLen=analyser?analyser.frequencyBinCount:2048;
+  const tArr=new Uint8Array(bufLen),fArr=new Uint8Array(bufLen);
+  function draw(){
+    animFrame=requestAnimationFrame(draw);
+    const Ww=waveC.getBoundingClientRect().width,Wh=waveC.getBoundingClientRect().height;
+    const Sw=specC.getBoundingClientRect().width,Sh=specC.getBoundingClientRect().height;
+    const Tw=tunerC.getBoundingClientRect().width,Th=tunerC.getBoundingClientRect().height;
+    if(analyser&&!isDemo){analyser.getByteTimeDomainData(tArr);analyser.getByteFrequencyData(fArr);}
+    else{
+      demoPhase+=0.018;
+      const fi=33+Math.round(4*Math.sin(demoPhase*0.2));
+      currentPitch=isRecording?NOTE_FREQS[Math.max(0,Math.min(NOTE_FREQS.length-1,fi))].freq:0;
+      for(let i=0;i<bufLen;i++){
+        const t=i/bufLen;
+        tArr[i]=isRecording?128+Math.round(36*Math.sin(2*Math.PI*t*65+demoPhase)+11*Math.sin(2*Math.PI*t*130+demoPhase*2)+5*(Math.random()-.5)):128+Math.round(2*(Math.random()-.5));
+        fArr[i]=isRecording?Math.max(0,Math.min(255,200*Math.exp(-i*0.05)+80*Math.sin(i*0.18)*Math.exp(-i*0.012)+20*Math.random())):Math.round(6*Math.random());
+      }
+      if(isRecording)currentDB=-17+5*Math.sin(demoPhase*0.5);
+    }
+    // Wave
+    wCtx.clearRect(0,0,Ww,Wh);wCtx.fillStyle='#ede8de';wCtx.fillRect(0,0,Ww,Wh);
+    wCtx.strokeStyle='rgba(26,107,110,0.18)';wCtx.lineWidth=0.5;wCtx.beginPath();wCtx.moveTo(0,Wh/2);wCtx.lineTo(Ww,Wh/2);wCtx.stroke();
+    wCtx.strokeStyle='#1a6b6e';wCtx.lineWidth=1.5;wCtx.beginPath();
+    const sw=Ww/tArr.length;let x=0;
+    for(let i=0;i<tArr.length;i++){const y=(tArr[i]/128)*Wh/2;i===0?wCtx.moveTo(x,y):wCtx.lineTo(x,y);x+=sw;}
+    wCtx.stroke();
+    // Spec
+    sCtx.fillStyle='#1a1412';sCtx.fillRect(0,0,Sw,Sh);
+    if(Sw>2){const img=sCtx.getImageData(2,0,Sw-2,Sh);sCtx.putImageData(img,0,0);}
+    const mb=Math.floor(bufLen*0.38);
+    for(let i=0;i<Sh;i++){const bin=Math.floor((Sh-i)/Sh*mb),val=fArr[bin]/255;sCtx.fillStyle=`hsl(${val>.65?48:val>.3?155:210},${val>.08?65:0}%,${val*62}%)`;sCtx.fillRect(Sw-2,i,2,1);}
+    // Real pitch
+    if(analyser&&!isDemo&&isRecording){
+      const buf=new Float32Array(analyser.fftSize);analyser.getFloatTimeDomainData(buf);
+      const p=autoCorrelate(buf,audioCtx.sampleRate);if(p>0)currentPitch=p;
+      let rms=0;for(const v of buf)rms+=v*v;rms=Math.sqrt(rms/buf.length);
+      currentDB=rms>.00001?Math.max(-60,20*Math.log10(rms)):-60;
+    }
+    drawTuner(tCtx,Tw,Th,currentPitch,isRecording);
+    if(isRecording&&currentPitch>60){
+      document.getElementById('mHz').textContent=Math.round(currentPitch);
+      document.getElementById('mDB').textContent=Math.round(currentDB);
+      document.getElementById('pitchDisplay').textContent=Math.round(currentPitch)+' Hz';
+      document.getElementById('mJit').textContent=(0.28+Math.random()*0.55).toFixed(2);
+      document.getElementById('mShim').textContent=(1.1+Math.random()*1.6).toFixed(2);
+      const cents=1200*Math.log2(currentPitch/NOTE_FREQS[noteIdx].freq);
+      document.getElementById('pitchBar').style.width=Math.max(0,Math.min(100,50+cents))+'%';
+    }else if(!isRecording){document.getElementById('pitchDisplay').textContent='— Hz';document.getElementById('pitchBar').style.width='0%';}
+  }
+  draw();
+}
+
+// ──────────────────────────────────────────────
+// TUNER DRAW (shared)
+// ──────────────────────────────────────────────
+function drawTuner(ctx,W,H,pitch,active){
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#f8f4ee';ctx.fillRect(0,0,W,H);
+  const cx=W/2,cy=H*.9,r=Math.min(W*.42,H*.85);
+  ctx.beginPath();ctx.arc(cx,cy,r,Math.PI*1.1,Math.PI*1.9);ctx.strokeStyle='rgba(26,20,18,0.1)';ctx.lineWidth=3.5;ctx.stroke();
+  ctx.beginPath();ctx.arc(cx,cy,r,Math.PI*1.45,Math.PI*1.55);ctx.strokeStyle='rgba(26,107,110,0.28)';ctx.lineWidth=5;ctx.stroke();
+  for(let i=-5;i<=5;i++){const a=Math.PI*(1.5+i*0.08);ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*(i===0?r-18:r-11),cy+Math.sin(a)*(i===0?r-18:r-11));ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);ctx.strokeStyle=i===0?'#1a6b6e':'rgba(26,20,18,0.18)';ctx.lineWidth=i===0?2:.8;ctx.stroke();}
+  if(pitch>60&&active){
+    const near=nearestNote(pitch),cents=1200*Math.log2(pitch/near.freq);
+    const angle=Math.PI*(1.5+(Math.max(-50,Math.min(50,cents))/50)*0.4),inTune=Math.abs(cents)<10;
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(angle)*(r-5),cy+Math.sin(angle)*(r-5));ctx.strokeStyle=inTune?'#1a6b6e':'#8b1a1a';ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.arc(cx,cy,4,0,Math.PI*2);ctx.fillStyle='#1a1412';ctx.fill();
+    ctx.font='600 14px "JetBrains Mono",monospace';ctx.fillStyle=inTune?'#1a6b6e':'#8b1a1a';ctx.textAlign='center';ctx.fillText(near.name,cx,cy-r*.55);
+    ctx.font='10px "JetBrains Mono",monospace';ctx.fillStyle='#7a7268';const cs=Math.round(cents);ctx.fillText((cs>0?'+':'')+cs+' ¢',cx,cy-r*.28);
+  }else{ctx.font='11px "Noto Sans TC",sans-serif';ctx.fillStyle='#7a7268';ctx.textAlign='center';ctx.fillText('等待聲音輸入...',cx,cy-r*.42);}
+}
+
+// ──────────────────────────────────────────────
+// AUTOCORRELATION
+// ──────────────────────────────────────────────
+function autoCorrelate(buf,sr){
+  let rms=0;for(const v of buf)rms+=v*v;rms=Math.sqrt(rms/buf.length);if(rms<.008)return -1;
+  let r1=0,r2=buf.length-1;const th=0.2;
+  while(r1<buf.length/2&&Math.abs(buf[r1])<th)r1++;while(r2>buf.length/2&&Math.abs(buf[r2])<th)r2--;
+  buf=buf.slice(r1,r2);const len=buf.length;const c=new Float32Array(len);
+  for(let i=0;i<len;i++)for(let j=0;j<len-i;j++)c[i]+=buf[j]*buf[j+i];
+  let d=0;while(d<len-1&&c[d]>c[d+1])d++;let mv=-1,mp=-1;
+  for(let i=d;i<len;i++)if(c[i]>mv){mv=c[i];mp=i;}if(mp<1)return -1;
+  let T=mp;const x1=c[T-1],x2=c[T],x3=T+1<len?c[T+1]:c[T];const a=(x1+x3-2*x2)/2,b=(x3-x1)/2;if(a)T-=b/(2*a);
+  const f=sr/T;return(f>55&&f<1400)?f:-1;
+}
+
+// ──────────────────────────────────────────────
+// RECORD (viz page)
+// ──────────────────────────────────────────────
+function toggleRecord(){
+  // iOS AudioContext resume on user gesture
+  if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();
+  isRecording=!isRecording;
+  const btn=document.getElementById('recBtn'),icon=document.getElementById('recIcon'),lbl=document.getElementById('recLbl'),dot=document.getElementById('micDot');
+  if(isRecording){btn.classList.add('recording');icon.textContent='⏹';lbl.textContent='停止';dot.className='dot rec';document.getElementById('statusTxt').textContent='錄音中';document.getElementById('analyzeBtn').disabled=false;}
+  else{btn.classList.remove('recording');icon.textContent='⏺';lbl.textContent='錄音';dot.className='dot active';document.getElementById('statusTxt').textContent='待機中';currentPitch=0;currentDB=-60;['mHz','mDB','mJit','mShim'].forEach(id=>document.getElementById(id).textContent='—');}
+}
+
+// ──────────────────────────────────────────────
+// ANALYSIS
+// ──────────────────────────────────────────────
+function runAnalysis(){
+  if(isRecording)toggleRecord();
+  const r=(lo,hi)=>lo+Math.random()*(hi-lo);
+  const scores=[r(65,95),r(60,92),r(52,88),r(58,90),r(65,93),r(48,88)];
+  const overall=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
+  document.getElementById('scoreArc').style.strokeDashoffset=213.6*(1-overall/100);
+  document.getElementById('scoreNum').textContent=overall;
+  let grade,color,sub;
+  if(overall>=88){grade='優秀';color='#1a6b6e';sub='嗓音狀態極佳，繼續保持！';}
+  else if(overall>=75){grade='良好';color='#c9973a';sub='整體表現不錯，仍有提升空間。';}
+  else if(overall>=60){grade='尚可';color='#8b6b1a';sub='基礎穩固，建議加強練習。';}
+  else{grade='需加強';color='#8b1a1a';sub='多練習氣息控制與音準穩定度。';}
+  document.getElementById('scoreGrade').textContent=grade;document.getElementById('scoreGrade').style.color=color;
+  document.getElementById('scoreArc').style.stroke=color;document.getElementById('scoreSub').textContent=sub;
+  if(radarChart){radarChart.data.datasets[0].data=scores.map(v=>Math.round(v));radarChart.update();}
+  const tips=['嘗試放鬆下巴與喉嚨肌肉，讓共鳴腔更自然地開放，音色將更圓潤。','保持穩定均勻的氣流支撐，避免喉部過度施力，是提升音準穩定度的關鍵。','音準不穩可能源於緊張，錄音前先做幾次深腹式呼吸可明顯改善。','嘗試感受聲音在鼻腔與額頭的振動感，這有助於增強頭腔共鳴效果。'];
+  document.getElementById('tipBox').innerHTML='<strong>AI 建議：</strong>'+tips[Math.floor(Math.random()*tips.length)];
+  const now=new Date(),t=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0')+':'+now.getSeconds().toString().padStart(2,'0');
+  history.unshift({time:t,score:overall,note:NOTE_FREQS[noteIdx].name,grade});
+  renderHistory();document.getElementById('analyzeBtn').disabled=true;
+  switchPage('score',document.getElementById('nav-score'));
+}
+
+function renderHistory(){
+  const list=document.getElementById('historyList');
+  if(!history.length){list.innerHTML='<div class="history-empty">尚無記錄。<br>錄音並分析後將自動儲存於此。</div>';return;}
+  list.innerHTML=history.map((h,i)=>`<div class="h-item"><span class="h-idx">#${history.length-i}</span><span class="h-time">${h.time}</span><span class="h-note">${h.note}</span><span class="h-grade">${h.grade}</span><span class="h-score">${h.score}</span></div>`).join('');
+}
+function clearData(){
+  history=[];renderHistory();
+  document.getElementById('scoreNum').textContent='—';document.getElementById('scoreGrade').textContent='尚未測量';document.getElementById('scoreGrade').style.color='';document.getElementById('scoreSub').textContent='錄音後點擊「分析嗓音」';
+  document.getElementById('scoreArc').style.strokeDashoffset='213.6';document.getElementById('scoreArc').style.stroke='#c9973a';
+  document.getElementById('tipBox').innerHTML='<strong>提示：</strong>發出持續的母音「啊—」維持 3–5 秒，可獲得最佳分析結果。';
+  if(radarChart){radarChart.data.datasets[0].data=[0,0,0,0,0,0];radarChart.update();}
+}
+
+// ──────────────────────────────────────────────
+// NOTE NAV
+// ──────────────────────────────────────────────
+function prevNote(){noteIdx=Math.max(0,noteIdx-1);updateTargetNote();}
+function nextNote(){noteIdx=Math.min(NOTE_FREQS.length-1,noteIdx+1);updateTargetNote();}
+function updateTargetNote(){const n=NOTE_FREQS[noteIdx];document.getElementById('targetNote').textContent=n.name;document.getElementById('targetHz').textContent=Math.round(n.freq)+' Hz';}
+
+// ──────────────────────────────────────────────
+// PAGE NAV
+// ──────────────────────────────────────────────
+function switchPage(name,navBtn){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+  navBtn.classList.add('active');
+  document.getElementById('scrollArea').scrollTop=0;
+  if(name==='viz')setTimeout(resizeAll,100);
+  if(name==='score')setTimeout(()=>{if(radarChart)radarChart.resize();},100);
+  if(name==='exercises')setTimeout(()=>resizeC(exTC),100);
+}
+
+// ──────────────────────────────────────────────
+// EXERCISE LIST
+// ──────────────────────────────────────────────
+function renderExList(){
+  document.getElementById('exList').innerHTML=EXERCISES.map((ex,i)=>`
+    <div class="ex-card ${i===selExIdx?'sel':''}" onclick="selectEx(${i})">
+      <div class="ex-head"><span class="ex-title-txt">${ex.title}</span><span class="ex-badge ${ex.badgeClass}">${ex.badge}</span></div>
+      <div class="ex-short-desc">${ex.shortDesc}</div>
+    </div>`).join('');
+}
+
+function selectEx(idx){
+  if(exRunning)stopExercise();
+  selExIdx=idx;renderExList();renderExRunner();
+  document.getElementById('scrollArea').scrollTop=0;
+}
+
+// ──────────────────────────────────────────────
+// EXERCISE RUNNER
+// ──────────────────────────────────────────────
+function renderExRunner(){
+  const ex=EXERCISES[selExIdx];
+  document.getElementById('exRunnerTitle').textContent=ex.title;
+  document.getElementById('exRunnerDesc').textContent=ex.desc;
+  document.getElementById('exStepList').innerHTML=ex.steps.map((s,i)=>`
+    <div class="ex-step ${i===0?'current':''}" id="exstep-${i}">
+      <div class="step-num">${i+1}</div>
+      <div>${s.label}${s.duration?' （'+s.duration+' 秒）':''}</div>
+    </div>`).join('');
+  document.getElementById('countdownWrap').style.display='none';
+  document.getElementById('exPitchPanel').style.display='none';
+  document.getElementById('exSkipBtn').style.display='none';
+  document.getElementById('exResult').classList.remove('show');
+  const sb=document.getElementById('exStartBtn');sb.textContent='▶ 開始練習';sb.classList.remove('running');
+}
+
+function toggleExercise(){exRunning?stopExercise():startExercise();}
+
+function startExercise(){
+  if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();
+  exRunning=true;exStepIdx=0;exScores=[];isRecording=true;
+  document.getElementById('micDot').className='dot rec';
+  document.getElementById('statusTxt').textContent='練習中';
+  const sb=document.getElementById('exStartBtn');sb.textContent='⏹ 停止練習';sb.classList.add('running');
+  document.getElementById('exSkipBtn').style.display='block';
+  document.getElementById('exResult').classList.remove('show');
+  runStep();
+}
+
+function stopExercise(){
+  exRunning=false;isRecording=false;
+  clearInterval(exTimer);exTimer=null;
+  cancelAnimationFrame(exTunerRAF);exTunerRAF=null;
+  document.getElementById('micDot').className='dot active';
+  document.getElementById('statusTxt').textContent='待機中';
+  document.getElementById('countdownWrap').style.display='none';
+  document.getElementById('exPitchPanel').style.display='none';
+  document.getElementById('exSkipBtn').style.display='none';
+  const sb=document.getElementById('exStartBtn');sb.textContent='▶ 開始練習';sb.classList.remove('running');
+  currentPitch=0;
+}
+
+function runStep(){
+  if(!exRunning)return;
+  const ex=EXERCISES[selExIdx],step=ex.steps[exStepIdx];
+  if(!step){finishExercise();return;}
+  // Highlight steps
+  ex.steps.forEach((_,i)=>{const el=document.getElementById('exstep-'+i);if(!el)return;el.className='ex-step'+(i<exStepIdx?' done':i===exStepIdx?' current':'');});
+  exSecsLeft=step.duration;exTotalSecs=step.duration;
+  document.getElementById('countdownWrap').style.display='flex';
+  updateCountdown();
+  const isPitch=step.type==='hold'&&step.note;
+  document.getElementById('exPitchPanel').style.display=isPitch?'block':'none';
+  if(isPitch){
+    document.getElementById('exTargetVal').textContent=step.note+' ('+Math.round(noteFreq(step.note))+' Hz)';
+    startExTuner(step.note);
+  }else{
+    cancelAnimationFrame(exTunerRAF);
+    const W=exTC.getBoundingClientRect().width,H=exTC.getBoundingClientRect().height;
+    drawTuner(etCtx,W,H,0,false);
+  }
+  clearInterval(exTimer);
+  exTimer=setInterval(()=>{
+    exSecsLeft--;
+    if(isPitch&&currentPitch>60){const tf=noteFreq(step.note);const ac=Math.abs(1200*Math.log2(currentPitch/tf));exScores.push(Math.max(0,100-ac*1.5));}
+    if(exSecsLeft<=0){clearInterval(exTimer);exStepIdx++;runStep();}
+    else updateCountdown();
+  },1000);
+}
+
+function updateCountdown(){
+  const ex=EXERCISES[selExIdx],step=ex.steps[exStepIdx];if(!step)return;
+  const pct=exSecsLeft/exTotalSecs;
+  document.getElementById('cdArc').style.strokeDashoffset=276.5*(1-pct);
+  document.getElementById('cdNum').textContent=exSecsLeft;
+  document.getElementById('cdLbl').textContent=step.type==='rest'?'休息中':step.note?'發音中':'準備';
+  document.getElementById('cdArc').style.stroke=step.type==='rest'?'#c9973a':'#1a6b6e';
+}
+
+function skipStep(){clearInterval(exTimer);cancelAnimationFrame(exTunerRAF);exStepIdx++;runStep();}
+
+function startExTuner(targetNote){
+  const tF=noteFreq(targetNote);
+  function loop(){
+    if(!exRunning)return;
+    exTunerRAF=requestAnimationFrame(loop);
+    const W=exTC.getBoundingClientRect().width,H=exTC.getBoundingClientRect().height;
+    drawTuner(etCtx,W,H,currentPitch,isRecording);
+    if(currentPitch>60){
+      const cents=1200*Math.log2(currentPitch/tF),cl=Math.max(-60,Math.min(60,cents));
+      const pct=50+(cl/60)*50;
+      document.getElementById('centsNeedle').style.left=pct+'%';
+      document.getElementById('centsNeedle').style.background=Math.abs(cents)<10?'#2d7a3a':'#8b1a1a';
+      const cs=Math.round(cents);document.getElementById('centsLabel').textContent=(cs>0?'+':'')+cs+' ¢';
+      document.getElementById('exPitchVal').textContent=Math.round(currentPitch)+' Hz';
+    }else{document.getElementById('centsNeedle').style.left='50%';document.getElementById('centsLabel').textContent='— ¢';document.getElementById('exPitchVal').textContent='— Hz';}
+    // Demo: simulate target pitch
+    if(isDemo&&isRecording){const fi=NOTE_FREQS.findIndex(n=>n.name===targetNote);if(fi>=0)currentPitch=NOTE_FREQS[fi].freq*(1+(Math.random()-.5)*0.012);}
+  }
+  cancelAnimationFrame(exTunerRAF);loop();
+}
+
+function finishExercise(){
+  stopExercise();
+  const avg=exScores.length?Math.round(exScores.reduce((a,b)=>a+b,0)/exScores.length):0;
+  document.getElementById('exResult').classList.add('show');
+  document.getElementById('exResultScore').textContent=avg?avg+'分':'—';
+  const tips=['繼續保持穩定的氣息支撐，這是音準精準的基礎。','嘗試讓聲音感覺更向前、更集中，避免向後「吞音」。','每次練習前先暖聲 5 分鐘，可大幅提升精準度。','放鬆是關鍵——越緊張，音準越難穩定。'];
+  document.getElementById('exResultTip').textContent=tips[Math.floor(Math.random()*tips.length)];
+  const now=new Date(),t=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+  history.unshift({time:t,score:avg,note:EXERCISES[selExIdx].title.slice(0,4),grade:'練習'});
+  renderHistory();
+}
+
+// ── INIT ──────────────────────────────────────
+renderExList();
+renderExRunner();
+</script>
+</body>
+</html>
