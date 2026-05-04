@@ -132,7 +132,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;}
 
 /* KTV canvas */
 .ktv-wrap{position:relative;background:#0d1117;border-radius:12px;overflow:hidden;margin-bottom:.8rem;}
-#ktvCanvas{width:100%;height:180px;display:block;}
+#ktvCanvas{width:100%;height:220px;display:block;}
 .ktv-note-lbl{position:absolute;left:8px;top:8px;font-family:'JetBrains Mono',monospace;font-size:.7rem;color:rgba(255,255,255,.6);}
 .ktv-status{position:absolute;right:10px;top:8px;font-family:'JetBrains Mono',monospace;font-size:.62rem;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.1);color:rgba(255,255,255,.7);}
 .ktv-status.hit{background:rgba(45,122,58,.5);color:#7fff8a;}
@@ -647,8 +647,8 @@ function startVisualization(){
     // ── Metrics update
     updateMetrics();
 
-    // ── KTV if exercise running
-    if(exRunning&&ktvC.getBoundingClientRect().width>0) drawKTV();
+    // ── KTV always draws when exercises page visible
+    if(ktvC.getBoundingClientRect().width>0) drawKTV();
   }
   draw();
 }
@@ -905,99 +905,206 @@ function drawTuner(ctx,W,H,pitch,active){
 }
 
 // ═══════════════════════════════════════════════════════════
-// KTV ANIMATION
+// PITCH ARENA — vertical real-time dot vs target circle
+// Y axis = pitch (high = top, low = bottom), no X time axis
 // ═══════════════════════════════════════════════════════════
 const KTV={
   targetNote:'A4', targetFreq:440,
-  trail:[],         // [{x,y,t}]
-  targetX:0, targetY:0,
-  width:0, height:0,
   minFreq:0, maxFreq:0,
+  // smoothed display pitch (interpolated for fluid animation)
+  displayPitch:0,
+  // ring of recent pitch history (Y values) for trail
+  trail:[],      // [{y, alpha}]
+  hitStreak:0,
 };
 
 function initKTV(note){
-  KTV.targetNote=note;
-  KTV.targetFreq=noteFreq(note);
-  KTV.trail=[];
-  const W=ktvC.getBoundingClientRect().width, H=ktvC.getBoundingClientRect().height;
-  KTV.width=W; KTV.height=H;
-  // Y range: ±6 semitones around target
-  KTV.minFreq=KTV.targetFreq*Math.pow(2,-8/12);
-  KTV.maxFreq=KTV.targetFreq*Math.pow(2,8/12);
-  KTV.targetX=W*0.72;  // target circle at 72% from left
-  KTV.targetY=H/2;
-  document.getElementById('ktvNoteLbl').textContent='目標：'+note+' ('+Math.round(KTV.targetFreq)+' Hz)';
+  KTV.targetNote = note;
+  KTV.targetFreq = noteFreq(note);
+  KTV.trail = [];
+  KTV.displayPitch = 0;
+  KTV.hitStreak = 0;
+  // ±10 semitones visible range around target
+  KTV.minFreq = KTV.targetFreq * Math.pow(2, -10/12);
+  KTV.maxFreq = KTV.targetFreq * Math.pow(2,  10/12);
+  document.getElementById('ktvNoteLbl').textContent =
+    '目標：' + note + '  ' + Math.round(KTV.targetFreq) + ' Hz';
 }
 
+// Map frequency → canvas Y  (high pitch = small Y = top)
 function freqToY(freq, H){
-  const logMin=Math.log2(KTV.minFreq), logMax=Math.log2(KTV.maxFreq);
-  const logF=Math.log2(Math.max(KTV.minFreq,Math.min(KTV.maxFreq,freq)));
-  return H-(logF-logMin)/(logMax-logMin)*H;
+  const lo = Math.log2(KTV.minFreq), hi = Math.log2(KTV.maxFreq);
+  const lf = Math.log2(Math.max(KTV.minFreq, Math.min(KTV.maxFreq, freq)));
+  return H * (1 - (lf - lo) / (hi - lo));
 }
 
 function drawKTV(){
-  const W=ktvC.getBoundingClientRect().width, H=ktvC.getBoundingClientRect().height;
-  if(!W||!H) return;
-  kCtx.fillStyle='#0d1117';kCtx.fillRect(0,0,W,H);
+  const W = ktvC.getBoundingClientRect().width;
+  const H = ktvC.getBoundingClientRect().height;
+  if(!W || !H) return;
 
-  // Grid lines (semitone bands)
-  for(let s=-8;s<=8;s+=2){
-    const f=KTV.targetFreq*Math.pow(2,s/12);
-    const y=freqToY(f,H);
-    kCtx.strokeStyle='rgba(255,255,255,0.05)';kCtx.lineWidth=.5;
-    kCtx.beginPath();kCtx.moveTo(0,y);kCtx.lineTo(W,y);kCtx.stroke();
+  const cx = W / 2;          // horizontal centre (everything centred)
+  const targetY = H / 2;     // target circle always at vertical centre
+  const TARGET_R = 28;       // radius of target acceptance zone
+  const now = Date.now();
+
+  // ── Background ──────────────────────────────────────────
+  kCtx.fillStyle = '#0d1117';
+  kCtx.fillRect(0, 0, W, H);
+
+  // ── Horizontal pitch guide lines ─────────────────────────
+  // Draw lines at every 2 semitones, label them
+  for(let s = -10; s <= 10; s += 2){
+    const f = KTV.targetFreq * Math.pow(2, s/12);
+    const y = freqToY(f, H);
+    const isTarget = s === 0;
+    kCtx.strokeStyle = isTarget ? 'rgba(26,157,162,0.25)' : 'rgba(255,255,255,0.04)';
+    kCtx.lineWidth = isTarget ? 1 : 0.5;
+    kCtx.setLineDash(isTarget ? [5,4] : []);
+    kCtx.beginPath(); kCtx.moveTo(0, y); kCtx.lineTo(W, y); kCtx.stroke();
+    kCtx.setLineDash([]);
+    if(s !== 0){
+      kCtx.font = '9px "JetBrains Mono",monospace';
+      kCtx.fillStyle = 'rgba(255,255,255,0.18)';
+      kCtx.textAlign = 'left';
+      kCtx.fillText((s > 0 ? '+' : '') + s + ' st', 4, y - 2);
+    }
   }
-  // Target line
-  const ty=freqToY(KTV.targetFreq,H);
-  kCtx.strokeStyle='rgba(26,157,162,0.3)';kCtx.lineWidth=1;kCtx.setLineDash([6,4]);
-  kCtx.beginPath();kCtx.moveTo(0,ty);kCtx.lineTo(W,ty);kCtx.stroke();
-  kCtx.setLineDash([]);
 
-  // Target circle (pulsing)
-  const now=Date.now();
-  const pulse=1+0.08*Math.sin(now/400);
-  const rTarget=20*pulse;
-  const grad=kCtx.createRadialGradient(KTV.targetX,ty,0,KTV.targetX,ty,rTarget);
-  grad.addColorStop(0,'rgba(26,157,162,0.4)');
-  grad.addColorStop(1,'rgba(26,157,162,0)');
-  kCtx.beginPath();kCtx.arc(KTV.targetX,ty,rTarget,0,Math.PI*2);kCtx.fillStyle=grad;kCtx.fill();
-  kCtx.beginPath();kCtx.arc(KTV.targetX,ty,14,0,Math.PI*2);kCtx.strokeStyle='rgba(26,157,162,0.8)';kCtx.lineWidth=2;kCtx.stroke();
-  kCtx.fillStyle='rgba(26,157,162,0.9)';kCtx.font='bold 9px "JetBrains Mono",monospace';kCtx.textAlign='center';kCtx.fillText(KTV.targetNote,KTV.targetX,ty+3.5);
+  // ── "Too High" / "Too Low" zone fills ────────────────────
+  const zoneH = H * 0.18;
+  const gTop = kCtx.createLinearGradient(0, 0, 0, zoneH);
+  gTop.addColorStop(0, 'rgba(139,26,26,0.22)');
+  gTop.addColorStop(1, 'rgba(139,26,26,0)');
+  kCtx.fillStyle = gTop; kCtx.fillRect(0, 0, W, zoneH);
 
-  // Voice dot trail
-  if(currentPitch>60&&exRunning){
-    const vx=W*0.28; // voice enters from left
-    const vy=freqToY(currentPitch,H);
-    // Animate toward target over time
-    const tElapsed=exTotalSecs>0?(exTotalSecs-exSecsLeft)/exTotalSecs:0;
-    const dotX=vx+(KTV.targetX-vx)*Math.min(1,tElapsed*1.2);
-    const dotY=vy;
-    KTV.trail.push({x:dotX,y:dotY,t:now});
-    // Trim trail >1.5s old
-    while(KTV.trail.length>0&&now-KTV.trail[0].t>1500) KTV.trail.shift();
+  const gBot = kCtx.createLinearGradient(0, H, 0, H - zoneH);
+  gBot.addColorStop(0, 'rgba(139,26,26,0.22)');
+  gBot.addColorStop(1, 'rgba(139,26,26,0)');
+  kCtx.fillStyle = gBot; kCtx.fillRect(0, H - zoneH, W, zoneH);
 
-    // Draw trail
-    for(let i=1;i<KTV.trail.length;i++){
-      const alpha=(i/KTV.trail.length)*0.6;
-      kCtx.beginPath();kCtx.moveTo(KTV.trail[i-1].x,KTV.trail[i-1].y);kCtx.lineTo(KTV.trail[i].x,KTV.trail[i].y);
-      kCtx.strokeStyle=`rgba(255,200,60,${alpha})`;kCtx.lineWidth=2;kCtx.stroke();
+  kCtx.font = '10px "Noto Sans TC",sans-serif';
+  kCtx.fillStyle = 'rgba(200,80,80,0.55)';
+  kCtx.textAlign = 'center';
+  kCtx.fillText('↑ 音高偏高', cx, 14);
+  kCtx.fillText('↓ 音高偏低', cx, H - 4);
+
+  // ── Target circle (always at vertical centre) ────────────
+  const pulse = 1 + 0.06 * Math.sin(now / 380);
+  const hitGlow = KTV.hitStreak > 3;
+
+  // Outer glow ring
+  const gGlow = kCtx.createRadialGradient(cx, targetY, 0, cx, targetY, TARGET_R * 2.2 * pulse);
+  gGlow.addColorStop(0, hitGlow ? 'rgba(80,220,120,0.22)' : 'rgba(26,157,162,0.18)');
+  gGlow.addColorStop(1, 'rgba(0,0,0,0)');
+  kCtx.beginPath();
+  kCtx.arc(cx, targetY, TARGET_R * 2.2 * pulse, 0, Math.PI*2);
+  kCtx.fillStyle = gGlow; kCtx.fill();
+
+  // Target ring stroke
+  kCtx.beginPath();
+  kCtx.arc(cx, targetY, TARGET_R, 0, Math.PI*2);
+  kCtx.strokeStyle = hitGlow ? 'rgba(80,220,120,0.9)' : 'rgba(26,157,162,0.75)';
+  kCtx.lineWidth = 2.5; kCtx.stroke();
+
+  // Inner fill
+  kCtx.beginPath();
+  kCtx.arc(cx, targetY, TARGET_R, 0, Math.PI*2);
+  kCtx.fillStyle = hitGlow ? 'rgba(80,220,120,0.08)' : 'rgba(26,157,162,0.06)';
+  kCtx.fill();
+
+  // Note label inside circle
+  kCtx.font = 'bold 13px "JetBrains Mono",monospace';
+  kCtx.fillStyle = hitGlow ? 'rgba(80,220,120,0.95)' : 'rgba(26,157,162,0.9)';
+  kCtx.textAlign = 'center';
+  kCtx.fillText(KTV.targetNote, cx, targetY + 5);
+
+  // ── Voice dot ────────────────────────────────────────────
+  const hasVoice = currentPitch > 60 && (exRunning || VD.voiceDetected);
+
+  if(hasVoice){
+    // Smooth display pitch
+    KTV.displayPitch = KTV.displayPitch > 0
+      ? KTV.displayPitch * 0.72 + currentPitch * 0.28
+      : currentPitch;
+
+    const dotY = freqToY(KTV.displayPitch, H);
+    const cents = 1200 * Math.log2(KTV.displayPitch / KTV.targetFreq);
+    const absCents = Math.abs(cents);
+    const inZone = absCents < 25;   // within target circle
+    const inRing = absCents < 50;   // close but outside
+
+    // Update hit streak
+    KTV.hitStreak = inZone ? KTV.hitStreak + 1 : 0;
+
+    // Trail: push new entry, age out old
+    KTV.trail.push({ y: dotY, t: now });
+    while(KTV.trail.length > 0 && now - KTV.trail[0].t > 1000) KTV.trail.shift();
+
+    // Draw trail line (vertical only — Y changes, X fixed at cx)
+    if(KTV.trail.length > 1){
+      for(let i = 1; i < KTV.trail.length; i++){
+        const age = (i / KTV.trail.length);
+        const trailColor = inZone
+          ? `rgba(100,230,140,${age * 0.55})`
+          : inRing
+            ? `rgba(255,200,60,${age * 0.45})`
+            : `rgba(220,80,80,${age * 0.4})`;
+        kCtx.beginPath();
+        kCtx.moveTo(cx, KTV.trail[i-1].y);
+        kCtx.lineTo(cx, KTV.trail[i].y);
+        kCtx.strokeStyle = trailColor;
+        kCtx.lineWidth = 3;
+        kCtx.stroke();
+      }
     }
 
-    // Voice dot
-    const inTarget=Math.abs(dotX-KTV.targetX)<16&&Math.abs(vy-ty)<18;
-    const dotColor=inTarget?'#7fff8a':'#ffc83c';
-    kCtx.beginPath();kCtx.arc(dotX,dotY,7,0,Math.PI*2);
-    kCtx.fillStyle=dotColor;kCtx.fill();
-    kCtx.strokeStyle='white';kCtx.lineWidth=1.5;kCtx.stroke();
+    // Dot glow
+    const dotR = 11;
+    const dotColor = inZone ? '#7fff8a' : inRing ? '#ffc83c' : '#ff6060';
+    const gDot = kCtx.createRadialGradient(cx, dotY, 0, cx, dotY, dotR * 2.5);
+    gDot.addColorStop(0, dotColor + 'aa');
+    gDot.addColorStop(1, dotColor + '00');
+    kCtx.beginPath(); kCtx.arc(cx, dotY, dotR * 2.5, 0, Math.PI*2);
+    kCtx.fillStyle = gDot; kCtx.fill();
 
-    // KTV status
-    const statusEl=document.getElementById('ktvStatus');
-    if(inTarget){statusEl.textContent='命中目標！';statusEl.className='ktv-status hit';}
-    else{const cents=Math.round(1200*Math.log2(currentPitch/KTV.targetFreq));statusEl.textContent=(cents>0?'+':'')+cents+' ¢';statusEl.className='ktv-status';}
-  }else{
-    KTV.trail=[];
-    document.getElementById('ktvStatus').textContent=exRunning?'等待發聲...':'準備中';
-    document.getElementById('ktvStatus').className='ktv-status';
+    // Dot body
+    kCtx.beginPath(); kCtx.arc(cx, dotY, dotR, 0, Math.PI*2);
+    kCtx.fillStyle = dotColor; kCtx.fill();
+    kCtx.strokeStyle = 'rgba(255,255,255,0.7)'; kCtx.lineWidth = 1.5; kCtx.stroke();
+
+    // Cents label next to dot
+    const csRound = Math.round(cents);
+    kCtx.font = 'bold 11px "JetBrains Mono",monospace';
+    kCtx.fillStyle = dotColor;
+    kCtx.textAlign = dotY < targetY ? 'left' : 'left';
+    kCtx.fillText((csRound > 0 ? '+' : '') + csRound + ' ¢', cx + dotR + 6, dotY + 4);
+
+    // Status overlay
+    const statusEl = document.getElementById('ktvStatus');
+    if(inZone){
+      statusEl.textContent = KTV.hitStreak > 8 ? '完美！保持！' : '命中目標！';
+      statusEl.className = 'ktv-status hit';
+    } else {
+      statusEl.textContent = cents > 0 ? '↑ 降低音高' : '↓ 提高音高';
+      statusEl.className = 'ktv-status';
+    }
+
+  } else {
+    // No voice
+    KTV.displayPitch = 0;
+    KTV.trail = [];
+    KTV.hitStreak = 0;
+    const statusEl = document.getElementById('ktvStatus');
+    statusEl.textContent = exRunning ? '發聲中...' : '準備中';
+    statusEl.className = 'ktv-status';
+
+    // Idle: draw dashed vertical guide
+    kCtx.strokeStyle = 'rgba(255,255,255,0.06)';
+    kCtx.lineWidth = 1.5;
+    kCtx.setLineDash([4, 6]);
+    kCtx.beginPath(); kCtx.moveTo(cx, 0); kCtx.lineTo(cx, H); kCtx.stroke();
+    kCtx.setLineDash([]);
   }
 }
 
